@@ -1,4 +1,4 @@
-name: Build & Release
+name: Build & Release BBMP
 
 on:
   push:
@@ -7,28 +7,45 @@ on:
       - 'v*.*'
       - 'v*.*.*'
 
-
-
 permissions:
   contents: write
-
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17 (Temurin) with Gradle cache
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '21'
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
 
-      - name: Build with Gradle
-        run: ./gradlew build
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Extract version from tag
+        run: echo "PROJECT_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Build fat jar (Shadow)
+        run: ./gradlew --no-daemon clean shadowJar -Pversion=${PROJECT_VERSION}
+
+      - name: Prepare release artifacts with BBMP naming
+        run: |
+          mkdir -p release
+          shopt -s nullglob
+          for f in build/libs/*-all.jar; do
+            cp "$f" "release/BlueBerryMinecraftProxy-${GITHUB_REF_NAME}.jar"
+          done
+          for f in build/libs/*.jar; do
+            [[ "$f" == *-all.jar ]] && continue
+            cp "$f" "release/BlueBerryMinecraftProxy-thin-${GITHUB_REF_NAME}.jar"
+          done
+          ls -l release
 
       - name: Generate changelog
         id: changelog
@@ -37,10 +54,11 @@ jobs:
           configuration: "release-changelog-builder-config.json"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          name: "BBMP ${GITHUB_REF_NAME}"
           body: ${{ steps.changelog.outputs.changelog }}
-          files: build/libs/*.jar
+          files: |
+            release/*.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
